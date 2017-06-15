@@ -1,6 +1,6 @@
-import sys
-
 from PyQt5 import QtWidgets, QtCore
+import sys
+#from Sources import aircraft
 
 
 if __name__=="__main__":
