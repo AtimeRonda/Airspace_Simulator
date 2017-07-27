@@ -5,22 +5,16 @@ from PyQt5.QtCore import pyqtSlot
 from PyQt5.QtGui import QWheelEvent
 
 import Aircraft
+import graphics_items as Items
 
 # constants
-ANIMATION_DELAY = 10      # milliseconds
+ANIMATION_DELAY = 300     # milliseconds
 AIRSPACE_BORDER_COLOR = "green"
-AIRSPACE_BORDER_WIDTH = 5
+AIRSPACE_BORDER_WIDTH = 1
 AIRSPACE_BACKGROUND_COLOR = "black"
 
 #temp var
-AIRSPACE_RADIUS = 1000
-
-
-class AirspaceProperties (object):
-    """Define the properties of the airspace"""
-    def __init__(self, radius):
-        self.radius = radius
-
+AIRSPACE_RADIUS = 80
 
 class RadarView(QtWidgets.QWidget):
     def __init__(self, airspace, flights, init_time):
@@ -30,30 +24,42 @@ class RadarView(QtWidgets.QWidget):
         #Defining attributes
         self.airspace = airspace
         self.flights = flights
-        self.time = init_time
-        self.incr = 1
+        self.time = init_time #time is in milliseconds
+        self.incr = 0
 
         #Initialize the view properties
         self.grview = None
         self.scene = None
         self.entry = None
+        self.console = QtWidgets.QLabel()
+
+        #Draw interface
+        self.x_center = 0
+        self.y_center = 0
+        self.radius = AIRSPACE_RADIUS
+        self.circle = QtWidgets.QGraphicsEllipseItem()
+        self.build_interface()
+
+        #Draw Airspace zone
+        self.draw_airspace()
+        self.grview.fitInView(self.grview.sceneRect(), QtCore.Qt.KeepAspectRatio)
+
+        #Create traffic view
+        self.moving = Items.MovingPlots(self, flights)
 
         # initiate a timer to ensure a proper animation
         self.timer = QtCore.QTimer(self)
         self.timer.timeout.connect(self.advance)
         self.timer.start(ANIMATION_DELAY)
 
-
-        self.build_interface()
-        self.draw_airspace()
-        self.grview.fitInView(self.grview.sceneRect(), QtCore.Qt.KeepAspectRatio)
-
     def build_interface(self):
         # create the root layout of this widget
         hbox_general = QtWidgets.QHBoxLayout(self)
-        vbox = QtWidgets.QVBoxLayout(self)
+        vbox = QtWidgets.QVBoxLayout()
+        vbox_command = QtWidgets.QVBoxLayout()
 
         hbox_general.addLayout(vbox)
+        hbox_general.addLayout(vbox_command)
 
         # create the view
         self.grview = QtWidgets.QGraphicsView()  # view to navigate in the...
@@ -87,20 +93,41 @@ class RadarView(QtWidgets.QWidget):
         add_button(' - ', lambda: self.zoom_view(1 / 1.1), hbox)
         add_button('+', lambda: self.zoom_view(1.1), hbox)
         hbox.addStretch()
-        add_button('<<', lambda: self.forward(-5), hbox)
-        add_button(' <', lambda: self.forward(-1), hbox)
+        add_button('<<', lambda: self.forward(-5000), hbox)
+        add_button(' <', lambda: self.forward(-1000), hbox)
         add_button('|>', self.playpause, hbox)
-        add_button(' >', lambda: self.forward(1), hbox)
-        add_button('>>', lambda: self.forward(5), hbox)
+        add_button(' >', lambda: self.forward(1000), hbox)
+        add_button('>>', lambda: self.forward(5000), hbox)
         self.entry = QtWidgets.QLineEdit()
         hbox.addWidget(self.entry)
+
         self.entry.setInputMask("00:00:00")
-        #self.entry.editingFinished.connect(self.change_time)
-        #self.entry.setText(traffic.hms(self.time))
+        self.entry.editingFinished.connect(self.change_time)
+        self.entry.setText(Aircraft.hms(self.time))
         hbox.addStretch()
 
-        add_button('Aircraft', emptySlot, hbox_general)
+
         hbox_general.addStretch()
+
+        #create display area
+        vbox_command.addWidget(self.console)
+        self.console.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.MinimumExpanding)
+        #self.console.setWordWrap(True)
+        self.console.setStyleSheet("""
+            .QLabel {
+                border: 5px solid black;
+                background-color: rgb(0, 0, 0);
+                color: rgb(11, 216, 52);
+                max-height: 40px;
+                font: bold 20px;
+            }
+        """)
+
+
+
+
+        #add_button('Aircraft', emptySlot, vbox_command)
+        vbox_command.addStretch()
 
 
     def draw_airspace(self):
@@ -110,11 +137,21 @@ class RadarView(QtWidgets.QWidget):
         self.scene.addItem(airspace_group)
 
         #Draw the border
-        circle = QtWidgets.QGraphicsEllipseItem(0,0,AIRSPACE_RADIUS,AIRSPACE_RADIUS, airspace_group)
+
         pen = QtGui.QPen(QtGui.QColor(AIRSPACE_BORDER_COLOR), AIRSPACE_BORDER_WIDTH)
         brush = QtGui.QBrush(QtGui.QColor(AIRSPACE_BACKGROUND_COLOR))
-        circle.setPen(pen)
-        circle.setBrush(brush)
+        self.circle = QtWidgets.QGraphicsEllipseItem(0, 0, AIRSPACE_RADIUS, AIRSPACE_RADIUS, airspace_group)
+        self.circle.setPen(pen)
+        self.circle.setBrush(brush)
+
+        #Paint center
+        self.x_center = self.circle.rect().width() // 2
+        self.y_center = self.circle.rect().height() // 2
+        center = QtWidgets.QGraphicsEllipseItem(self.x_center - Items.AIRCRAFT_RADIUS / 20, self.y_center - Items.AIRCRAFT_RADIUS / 20, Items.AIRCRAFT_RADIUS / 10, Items.AIRCRAFT_RADIUS / 10, airspace_group)
+        pen = QtGui.QPen(QtGui.QColor("green"), 2)
+        brush = QtGui.QBrush(QtGui.QColor("green"))
+        center.setPen(pen)
+        center.setBrush(brush)
 
 
         # #aircraft test
@@ -126,12 +163,12 @@ class RadarView(QtWidgets.QWidget):
 
 
     def update_traffic(self):
-        return 0
+        self.moving.update_plots()
 
     def set_time(self, time):
         """sets the time to the new value, and updates the two views"""
         self.entry.setText(Aircraft.hms(time))
-        self.time = time
+        self.time = time #set time in milliseconds
         self.update_traffic()
 
     @QtCore.pyqtSlot(int)
@@ -150,7 +187,7 @@ class RadarView(QtWidgets.QWidget):
     @QtCore.pyqtSlot()
     def advance(self):
         """this slot computes the new time at each time out"""
-        self.set_time(self.time + self.incr)
+        self.set_time(self.time + ANIMATION_DELAY + (self.incr * ANIMATION_DELAY // 1000))
         self.update_traffic()
 
     @QtCore.pyqtSlot()
@@ -165,3 +202,15 @@ class RadarView(QtWidgets.QWidget):
     def forward(self, i):
         """this slot updates the speed of the replay"""
         self.incr = i
+
+    @QtCore.pyqtSlot()
+    def change_time(self):
+        """slot triggered when a new time is input in the text field"""
+        self.set_time(Aircraft.time_step(self.entry.text()))
+        self.update_traffic()
+
+    @QtCore.pyqtSlot()
+    def displayFlightId(self, flight):
+        text = "Flight {} Heading {} at Speed {}".format(flight.callsign, math.ceil(flight.heading), flight.speed)
+        self.console.setText(text)
+        return 0
